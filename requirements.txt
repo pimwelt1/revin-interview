@@ -1,0 +1,24 @@
+# Backend and WebSocket server
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Configuration and validation
+pydantic>=2,<3
+pydantic-settings>=2,<3
+
+# Telephony and conversation model
+twilio
+openai>=1.68.2,<3
+
+# Callback calendar
+google-auth
+httpx
+
+# Structured logging
+structlog
+
+# Testing and code quality
+pytest
+pytest-asyncio
+ruff
