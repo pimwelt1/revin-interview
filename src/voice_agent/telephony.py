@@ -14,9 +14,9 @@ from starlette.datastructures import FormData
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import VoiceResponse
 
-from voice_agent.conversation import Conversation, Turn
 from voice_agent.prompts import GREETING, SYSTEM_UNAVAILABLE
-from voice_agent.prompts.workflow import message as workflow_message
+from voice_agent.prompts.phrases import message as phrase
+from voice_agent.session import Session, Turn
 from voice_agent.settings import Settings
 
 router = APIRouter()
@@ -143,9 +143,9 @@ async def call_ended(request: Request) -> Response:
     language = "es" if hint == "es" or reason == "es" else "en"
     text = ""
     if reason == "completed":
-        text = workflow_message("goodbye", language)
+        text = phrase("goodbye", language)
     elif reason == "silence":
-        text = workflow_message("silence_goodbye", language)
+        text = phrase("silence_goodbye", language)
     elif reason in {"failed", "en", "es"}:
         text = SYSTEM_UNAVAILABLE[language]
     if text:
@@ -166,14 +166,14 @@ async def conversation(websocket: WebSocket) -> None:
 class RelayCall:
     """Own one WebSocket and its single cancellable reply task.
 
-    Conversation owns business decisions; this class only handles transport.
+    Session and the agent own business decisions; this class only handles transport.
     """
 
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
         self.logger = structlog.get_logger()
         self.call_id: str | None = None
-        self.session: Conversation | None = None
+        self.session: Session | None = None
         self.reply_task: asyncio.Task | None = None
         self.close_code = 1000
         self.ending = False
@@ -226,7 +226,7 @@ class RelayCall:
     def start_session(self, identifier: str, caller_phone: str) -> None:
         state = self.websocket.app.state
         self.call_id = identifier
-        self.session = Conversation(identifier, state.model, caller_phone=caller_phone)
+        self.session = Session(identifier, state.graph, state.context, caller_phone=caller_phone)
         self.note_activity(playback=GREETING)
         self.silence_task = asyncio.create_task(self.watch_silence())
 
@@ -297,6 +297,8 @@ class RelayCall:
             with suppress(asyncio.CancelledError):
                 await self.silence_task
         await self.cancel_reply()
+        if self.session is not None:
+            await self.session.close()
         self.logger.info("twilio_disconnected", event_type="disconnect", call_id=self.call_id, close_code=self.close_code)
 
     # Record activity to prevent premature silence detection.
@@ -326,7 +328,7 @@ class RelayCall:
                     await self.end_session("silence")
                     return
                 self.silence_count += 1
-                text = workflow_message("silence", self.session.language)
+                text = phrase("silence", self.session.language)
                 self.session.note_silence_prompt(text)
                 await self.websocket.send_json({"type": "text", "token": text, "last": True})
                 self.note_activity(playback=text)

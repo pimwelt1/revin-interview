@@ -7,18 +7,22 @@ python-multipart
 pydantic>=2,<3
 pydantic-settings>=2,<3
 
-# Telephony and conversation model
+# Telephony
 twilio
+
+# Agent: LangGraph tool loop over an OpenAI chat model
+langgraph>=1.2,<2
+langchain-openai>=1.6,<2
 openai>=1.68.2,<3
 
-# Callback calendar
-google-auth
-httpx
+# Technician calendars (Google Calendar through Composio)
+composio>=0.21,<1
 
 # Structured logging
 structlog
 
 # Testing and code quality
+httpx
 pytest
 pytest-asyncio
 ruff
