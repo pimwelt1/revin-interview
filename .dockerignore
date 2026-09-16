@@ -1,0 +1,21 @@
+# Docker does not read .gitignore: anything not listed here is copied into the image.
+.git
+.venv
+__pycache__/
+*.pyc
+.pytest_cache
+.ruff_cache
+
+# Secrets belong in `fly secrets`, never in the image.
+.env
+
+# Call data and logs live on the volume. Only the technician list is seeded from the image.
+data/
+!data/technicians.csv
+logs/
+logs_run*/
+*.log
+
+tests/
+scripts/
+*.md

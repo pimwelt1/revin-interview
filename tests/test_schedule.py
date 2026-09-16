@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -9,7 +9,9 @@ from voice_agent.settings import Settings
 
 @pytest.fixture
 def weekday_settings(tmp_path) -> Settings:
-    return Settings(_env_file=None, data_dir=tmp_path, business_start_hour=8, business_end_hour=17, service_call_minutes=120)
+    return Settings(
+        _env_file=None, data_dir=tmp_path, business_start_hour=8, business_end_hour=17, service_call_minutes=120
+    )
 
 
 def test_windows_follow_business_days_and_hours_and_skip_the_past(weekday_settings):
@@ -31,8 +33,25 @@ def test_windows_follow_business_days_and_hours_and_skip_the_past(weekday_settin
 
 def test_window_label_is_spoken_without_time_zone(weekday_settings):
     window = schedule.window_from_id("2026-09-16 10:15", weekday_settings)
-    assert window.label() == "Wednesday, September 16, at 10:15 AM"
+    now = datetime(2026, 9, 14, 12, tzinfo=weekday_settings.timezone)
+    assert window.label(now) == "Wednesday, September 16, at 10:15 AM"
     assert schedule.spoken_time(datetime(2026, 9, 16, 13, 30, tzinfo=weekday_settings.timezone)) == "1:30 PM"
+
+
+@pytest.mark.parametrize(
+    ("slot_id", "expected"),
+    [
+        ("2026-09-15 23:45", "today at 11:45 PM"),
+        ("2026-09-16 10:15", "tomorrow at 10:15 AM"),
+        ("2026-09-17 10:15", "Thursday, September 17, at 10:15 AM"),
+    ],
+)
+def test_relative_labels_use_business_date_and_preserve_slot_ids(weekday_settings, slot_id, expected):
+    # Already September 16 in UTC, still September 15 in New York.
+    now = datetime(2026, 9, 16, 3, 30, tzinfo=timezone.utc)
+    window = schedule.window_from_id(slot_id, weekday_settings)
+    assert window.label(now) == expected
+    assert window.id == slot_id
 
 
 def test_unreadable_or_overlapping_calendars_are_not_free(weekday_settings):

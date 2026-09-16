@@ -1,5 +1,8 @@
+import json
 import logging
+import os
 import re
+from pathlib import Path
 
 import structlog
 from openai import APIError
@@ -33,7 +36,18 @@ def error_details(error: Exception) -> dict:
     }
 
 
-def configure_logging(level: str, secrets: tuple[str, ...] = ()) -> None:
+def configure_logging(
+    level: str, secrets: tuple[str, ...] = (), log_dir: Path = Path("logs"), console: bool = True
+) -> None:
+    """Log as JSON, one file per call in `log_dir`, and to the console unless `console` is off."""
+    def to_call_file(logger, method_name, event):
+        """Also write each line to logs/<call_id>.log, so one conversation can be read on its own."""
+        if event.get("call_id"):
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / f"{event['call_id']}.log").open("a", encoding="utf-8") as file:
+                file.write(json.dumps(event, default=str) + "\n")
+        return event
+
     def redact(logger, method_name, event):
         def clean(value):
             if isinstance(value, str):
@@ -55,9 +69,10 @@ def configure_logging(level: str, secrets: tuple[str, ...] = ()) -> None:
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             redact,
+            to_call_file,
             structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, level)),
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.PrintLoggerFactory(None if console else open(os.devnull, "w")),  # noqa: SIM115
         cache_logger_on_first_use=False,
     )

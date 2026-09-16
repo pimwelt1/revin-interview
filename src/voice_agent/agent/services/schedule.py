@@ -1,7 +1,7 @@
 """Service-call windows: when a technician could call the customer, and who is free."""
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 
 from voice_agent.agent.services.calendar import Interval
 from voice_agent.agent.services.storage import Technician
@@ -15,13 +15,26 @@ class Window:
     start: datetime
     end: datetime
 
+    @classmethod
+    def from_row(cls, row: dict[str, str], timezone: tzinfo) -> "Window":
+        """The window of a service call already stored in CSV, read back in business time."""
+        return cls(
+            datetime.fromisoformat(row["start"]).astimezone(timezone),
+            datetime.fromisoformat(row["end"]).astimezone(timezone),
+        )
+
     @property
     def id(self) -> str:
         """Stable, readable ID the model passes back when booking, e.g. '2026-09-16 10:00'."""
         return self.start.strftime(WINDOW_ID_FORMAT)
 
-    def label(self) -> str:
+    def label(self, now: datetime | None = None) -> str:
         """How the call time is said aloud, without a time zone."""
+        today = (now or datetime.now(self.start.tzinfo)).astimezone(self.start.tzinfo).date()
+        if self.start.date() == today:
+            return f"today at {spoken_time(self.start)}"
+        if self.start.date() == today + timedelta(days=1):
+            return f"tomorrow at {spoken_time(self.start)}"
         return f"{self.start:%A, %B} {self.start.day}, at {spoken_time(self.start)}"
 
 
@@ -53,7 +66,9 @@ def window_from_id(window_id: str, settings: Settings) -> Window:
     return Window(start, start + timedelta(minutes=settings.service_call_minutes))
 
 
-def free_technicians(window: Window, technicians: list[Technician], busy: dict[str, list[Interval]]) -> list[Technician]:
+def free_technicians(
+    window: Window, technicians: list[Technician], busy: dict[str, list[Interval]]
+) -> list[Technician]:
     """Technicians whose calendar was read and has nothing overlapping the window."""
     return [
         technician

@@ -9,12 +9,10 @@ import argparse
 import asyncio
 from uuid import uuid4
 
-from langgraph.checkpoint.memory import InMemorySaver
-
-from voice_agent.agent.agent import build_context, build_model
-from voice_agent.agent.graph import build_graph
+from voice_agent.agent.agent import build_context
+from voice_agent.agent.graph import build_call_graph
 from voice_agent.logging_config import configure_logging
-from voice_agent.prompts import GREETING, SYSTEM_UNAVAILABLE
+from voice_agent.prompts import SYSTEM_UNAVAILABLE, greeting
 from voice_agent.prompts.phrases import message as phrase
 from voice_agent.session import Session
 from voice_agent.settings import Settings
@@ -29,12 +27,16 @@ async def main() -> None:
 
     settings = Settings()
     settings.require("OPENAI_API_KEY", "OPENAI_MODEL", "COMPOSIO_API_KEY", "COMPANY_EMAIL", "EMAIL_FROM")
-    configure_logging("INFO" if args.verbose else "WARNING", secrets=(settings.openai_api_key.get_secret_value(),))
+    # Always INFO so logs/<call_id>.log is complete; --verbose also prints it.
+    configure_logging(
+        "INFO",
+        secrets=(settings.openai_api_key.get_secret_value(), settings.composio_api_key.get_secret_value()),
+        console=args.verbose,
+    )
     context = build_context(settings)
-    graph = build_graph(build_model(settings), InMemorySaver())
-    session = Session(f"chat-{uuid4().hex[:8]}", graph, context, caller_phone=args.phone)
+    session = Session(f"chat-{uuid4().hex[:8]}", build_call_graph(settings), context, caller_phone=args.phone)
 
-    print(f"Agent: {GREETING}")
+    print(f"Agent: {greeting(settings)}")
     while not (session.finished or session.failed):
         try:
             text = (await asyncio.to_thread(input, "\nYou: ")).strip()

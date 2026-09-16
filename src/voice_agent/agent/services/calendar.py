@@ -1,32 +1,12 @@
 """Technician calendars: read busy times and create events through Composio's Google Calendar tools."""
 
 from datetime import datetime
-from typing import Protocol, runtime_checkable
 
 import structlog
 
 from voice_agent.agent.services.composio import ComposioError, ComposioTools, find_key
 
 Interval = tuple[datetime, datetime]
-
-
-@runtime_checkable
-class Calendar(Protocol):
-    def busy(self, calendar_ids: list[str], start: datetime, end: datetime) -> dict[str, list[Interval]]:
-        """Busy intervals per calendar. Calendars that could not be read are left out, never reported as free."""
-        ...
-
-    def create_event(self, calendar_id: str, start: datetime, end: datetime, summary: str, description: str) -> str:
-        """Create an event and return its ID."""
-        ...
-
-    def move_event(self, calendar_id: str, event_id: str, start: datetime, end: datetime) -> None:
-        """Change an event's time on the same calendar."""
-        ...
-
-    def delete_event(self, calendar_id: str, event_id: str) -> None:
-        """Delete an event. Deleting an event that is already gone is not an error."""
-        ...
 
 
 class ComposioCalendar:
@@ -36,6 +16,7 @@ class ComposioCalendar:
         self.logger = structlog.get_logger()
 
     def busy(self, calendar_ids: list[str], start: datetime, end: datetime) -> dict[str, list[Interval]]:
+        """Busy intervals per calendar. Calendars that could not be read are left out, never reported as free."""
         data = self.composio.execute(
             "GOOGLECALENDAR_FREE_BUSY_QUERY",
             {"items": calendar_ids, "timeMin": start.isoformat(), "timeMax": end.isoformat(), "timeZone": self.timezone},
@@ -54,6 +35,7 @@ class ComposioCalendar:
         return result
 
     def create_event(self, calendar_id: str, start: datetime, end: datetime, summary: str, description: str) -> str:
+        """Create an event and return its ID."""
         data = self.composio.execute(
             "GOOGLECALENDAR_CREATE_EVENT",
             {
@@ -86,6 +68,7 @@ class ComposioCalendar:
         )
 
     def delete_event(self, calendar_id: str, event_id: str) -> None:
+        """Delete an event. Deleting an event that is already gone is not an error."""
         self.composio.execute(
             "GOOGLECALENDAR_DELETE_EVENT", {"calendar_id": calendar_id, "event_id": event_id, "send_updates": "none"}
         )

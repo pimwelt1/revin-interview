@@ -9,17 +9,22 @@ class ComposioError(Exception):
     """Composio could not run the tool, or the tool reported a failure."""
 
 
+# Composio versions each toolkit on its own release train, so these are pinned separately.
+TOOLKIT_VERSIONS = {
+    "googlecalendar": "20260915_00",
+    "gmail": "20260915_00",
+    "google_maps": "20260721_00",
+}
+
+
 class ComposioTools:
     def __init__(self, api_key: str, user_id: str):
-        self.client = Composio(api_key=api_key)
+        self.client = Composio(api_key=api_key, toolkit_versions=TOOLKIT_VERSIONS)
         self.user_id = user_id
 
     def execute(self, slug: str, arguments: dict[str, Any]) -> dict[str, Any]:
         try:
-            # Composio refuses "latest" tool versions unless told otherwise; pin a version once the demo is stable.
-            result = self.client.tools.execute(
-                slug, arguments, user_id=self.user_id, dangerously_skip_version_check=True
-            )
+            result = self.client.tools.execute(slug, arguments, user_id=self.user_id)
         except Exception as error:
             raise ComposioError(f"{slug} request failed: {type(error).__name__}") from error
         if not result.get("successful"):

@@ -1,10 +1,11 @@
 """CSV storage: technicians, booked service calls, and urgent requests emailed to the team."""
 
 import csv
-import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from voice_agent.agent.details import normalize_phone
 
 SERVICE_CALL_FIELDS = [
     "id",
@@ -15,6 +16,8 @@ SERVICE_CALL_FIELDS = [
     "phone",  # the number the technician calls
     "calling_from",  # the number the customer called from; used to find their calls later
     "address",
+    "city",
+    "zip_code",
     "issue",
     "technician",
     "calendar_id",
@@ -23,13 +26,25 @@ SERVICE_CALL_FIELDS = [
     "end",
 ]
 
-URGENT_REQUEST_FIELDS = ["id", "created_at", "call_id", "customer_name", "phone", "calling_from", "address", "issue"]
+URGENT_REQUEST_FIELDS = [
+    "id",
+    "created_at",
+    "call_id",
+    "customer_name",
+    "phone",
+    "calling_from",
+    "address",
+    "city",
+    "zip_code",
+    "issue",
+]
 
 
 @dataclass(frozen=True)
 class Technician:
     name: str
     calendar_id: str
+    address: str = ""  # home base, used to check the service radius
 
 
 class Storage:
@@ -42,7 +57,9 @@ class Storage:
 
     def technicians(self) -> list[Technician]:
         technicians = [
-            Technician(name=row["name"].strip(), calendar_id=row["calendar_id"].strip())
+            Technician(
+                name=row["name"].strip(), calendar_id=row["calendar_id"].strip(), address=row.get("address", "").strip()
+            )
             for row in read_rows(self.technicians_file)
             if row.get("name", "").strip() and row.get("calendar_id", "").strip()
         ]
@@ -79,9 +96,9 @@ class Storage:
 
 
 def same_phone(a: str, b: str) -> bool:
-    """Compare phone numbers by their last 10 digits, so '+1 (917) 261-8204' matches '19172618204'."""
-    a_digits, b_digits = re.sub(r"\D", "", a)[-10:], re.sub(r"\D", "", b)[-10:]
-    return len(a_digits) >= 7 and a_digits == b_digits
+    """Compare callback numbers using the same US format accepted during collection."""
+    normalized = normalize_phone(a)
+    return bool(normalized) and normalized == normalize_phone(b)
 
 
 def read_rows(path: Path, **filters: str) -> list[dict[str, str]]:

@@ -14,15 +14,12 @@ from starlette.datastructures import FormData
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import VoiceResponse
 
-from voice_agent.prompts import GREETING, SYSTEM_UNAVAILABLE
+from voice_agent.prompts import SYSTEM_UNAVAILABLE, greeting
 from voice_agent.prompts.phrases import message as phrase
 from voice_agent.session import Session, Turn
 from voice_agent.settings import Settings
 
 router = APIRouter()
-
-KNOWN_EVENTS = {"setup", "prompt", "interrupt", "error", "disconnect"}
-
 
 """Useful validation functions for Twilio call validation."""
 
@@ -92,6 +89,7 @@ class TwilioProvider:
         self._netloc = urlsplit(base).netloc
         self._path = urlsplit(base).path
         self._voice = settings.relay_voice
+        self._greeting = greeting(settings)
         self._validator = RequestValidator(settings.twilio_auth_token.get_secret_value())
 
     def https_url(self, path: str, query: str = "") -> str:
@@ -109,7 +107,7 @@ class TwilioProvider:
         response = VoiceResponse()
         response.connect(action=self.https_url("/call-ended"), method="POST").conversation_relay(
             url=self.wss_url("/conversation"),
-            welcome_greeting=GREETING,
+            welcome_greeting=self._greeting,
             interruptible="speech",
             report_input_during_agent_speech="speech",
             preemptible=True,
@@ -117,6 +115,7 @@ class TwilioProvider:
             transcription_provider="Deepgram",
             speech_model="nova-3-general",
             tts_provider="ElevenLabs",
+            elevenlabs_text_normalization="auto",
             voice=self._voice,
             events="speaker-events tokens-played",
         )
@@ -227,7 +226,8 @@ class RelayCall:
         state = self.websocket.app.state
         self.call_id = identifier
         self.session = Session(identifier, state.graph, state.context, caller_phone=caller_phone)
-        self.note_activity(playback=GREETING)
+        # The relay is already playing the greeting, so don't expect the caller to speak until it finishes.
+        self.note_activity(playback=greeting(state.settings))
         self.silence_task = asyncio.create_task(self.watch_silence())
 
     async def end_session(self, reason: str) -> None:

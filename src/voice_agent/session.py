@@ -10,13 +10,13 @@ from itertools import pairwise
 from time import monotonic
 
 import structlog
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 from voice_agent.agent.state import AgentContext
 from voice_agent.logging_config import error_details
-from voice_agent.prompts import GREETING
+from voice_agent.prompts import greeting
 
 # Bounds the agent ⇄ tools loop within one caller turn.
 RECURSION_LIMIT = 12
@@ -37,7 +37,8 @@ class Session:
         self.config = {"configurable": {"thread_id": call_id}, "recursion_limit": RECURSION_LIMIT}
         self.turn: Turn | None = None
         self.previous_turn: Turn | None = None
-        self.phone_notes: list[str] = [GREETING]  # said by the phone layer, not yet in the transcript
+        # Said by the phone layer, not yet in the transcript.
+        self.phone_notes: list[str] = [greeting(context.settings)]
         self.language = "en"
         self.language_votes: list[str] = []  # languages of the caller turns that counted, in order
         self.failed = self.finished = False
@@ -82,7 +83,9 @@ class Session:
                     if not self.is_current(turn):
                         return
                     if not turn.response:
-                        self.logger.info("first_token", turn_id=turn.id, elapsed_ms=round((monotonic() - started) * 1000))
+                        self.logger.info(
+                            "first_token", turn_id=turn.id, elapsed_ms=round((monotonic() - started) * 1000)
+                        )
                     turn.response += text
                     yield text
         except Exception as error:  # noqa: BLE001 - any agent failure must end the call cleanly
@@ -90,25 +93,43 @@ class Session:
                 self.failed = True
                 self.logger.error("system_error", turn_id=turn.id, stage="agent", **error_details(error))
         finally:
-            self.logger.info("agent_response", turn_id=turn.id, source="agent", text=turn.response, interrupted=turn.interrupted)
+            self.logger.info(
+                "agent_response", turn_id=turn.id, source="agent", text=turn.response, interrupted=turn.interrupted
+            )
             self.logger.info("turn_finished", turn_id=turn.id, elapsed_ms=round((monotonic() - started) * 1000))
 
     async def run_agent(self, turn: Turn) -> AsyncIterator[str]:
-        """Run the graph once for this utterance and yield the agent's spoken text."""
+        """Run the graph once for this utterance and yield the agent's spoken text.
+
+        Only the conversational agent is audible; extracted details never reach the phone.
+        """
         inputs = {
             "messages": [*await self.catch_up_messages(), HumanMessage(turn.caller)],
             "call_id": self.call_id,
+            "turn_id": turn.id,
             "caller_phone": self.caller_phone,
             "language": self.language,
         }
         self.phone_notes = []
+        message_id, spoken = None, ""
         stream = self.graph.astream(inputs, self.config, context=self.context, stream_mode="messages")
         async with aclosing(stream) as chunks:
             async for message, metadata in chunks:
                 if isinstance(message, ToolMessage):
-                    self.logger.info("tool_result", turn_id=turn.id, tool=message.name)
-                elif metadata["langgraph_node"] == "agent" and isinstance(message, AIMessage) and message.content:
+                    self.logger.info("tool_result", turn_id=turn.id, tool=message.name, text=message.text)
+                    continue
+                if metadata["langgraph_node"] != "agent" or not isinstance(message, AIMessage) or not message.content:
+                    continue
+                if message.id != message_id:
+                    message_id, spoken = message.id, ""
+                if isinstance(message, AIMessageChunk):
+                    spoken += message.text
                     yield message.text
+                elif message.text.startswith(spoken):
+                    remainder = message.text[len(spoken) :]
+                    if remainder:
+                        yield remainder
+                    spoken = message.text
         state = await self.graph.aget_state(self.config)
         self.finished = bool(state.values.get("call_finished"))
 
@@ -139,8 +160,6 @@ class Session:
 
         A turn counts if it has 3+ words and Twilio's hint is English or Spanish.
         Once two counted turns in a row agree, that language stays until two turns in a row agree on the other one.
-        Before that, follow the latest counted turn. If nothing has counted yet, use this turn's hint if it is Spanish,
-        otherwise English.
         """
         language = hint.strip().lower()[:2]
         if language in ("en", "es") and len(text.split()) >= 3:

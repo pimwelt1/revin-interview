@@ -1,7 +1,7 @@
 from conftest import call, say, talk
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from voice_agent.prompts import GREETING
+from voice_agent.prompts import greeting
 from voice_agent.session import TOOL_INTERRUPTED
 
 
@@ -16,7 +16,7 @@ async def test_reply_streams_agent_text_and_greeting_is_in_transcript(make_sessi
 
     messages = await transcript(session)
     assert [type(m) for m in messages] == [AIMessage, HumanMessage, AIMessage]
-    assert messages[0].content == GREETING
+    assert messages[0].content == greeting(session.context.settings)
 
 
 async def test_end_call_finishes_the_session_without_another_model_call(make_session):
@@ -101,3 +101,17 @@ def test_language_follows_the_latest_turn_until_two_in_a_row_agree(make_session)
     assert session.choose_language("no funciona desde ayer", "es-MX") == "es"
     assert session.choose_language("my address is twelve Oak Street", "en-US") == "es"  # one English sentence
     assert session.choose_language("I prefer English, thank you", "en-US") == "en"  # two in a row
+
+
+async def test_streaming_holding_speech_and_tool_followup_both_reach_the_caller(make_session):
+    holding = call("find_my_service_calls")
+    holding.content = "One moment. "
+    session, model = make_session(
+        holding, say("I found no upcoming calls."), streaming=True, details=[{"customer_name": "Jane"}]
+    )
+    spoken = await talk(session, "Jane, do I have a call booked?")
+    assert spoken == "One moment. I found no upcoming calls."
+    assert "last name" in model.received[0][0].content
+    assert "customer_name" not in spoken
+    messages = await transcript(session)
+    assert all('"customer_name"' not in message.text for message in messages)

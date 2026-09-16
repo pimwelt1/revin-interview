@@ -3,7 +3,7 @@ from typing import Literal, Self
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,16 +19,14 @@ class Settings(BaseSettings):
 
     # Telephony
     public_base_url: str = ""
-    twilio_account_sid: str = ""
     twilio_auth_token: SecretStr = SecretStr("")
-    twilio_phone_number: str = ""
-    silence_timeout_seconds: float = Field(default=10, gt=0, le=120)
-    relay_voice: str = "UgBBYS2sOqTuMpoF3BR0"
+    silence_timeout_seconds: float = 10
+    relay_voice: str = "UgBBYS2sOqTuMpoF3BR0-0.95_0.80_0.80"
 
     # Agent model
     openai_api_key: SecretStr = SecretStr("")
     openai_model: str = "gpt-4.1-mini"
-    model_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    model_timeout_seconds: float = 20
 
     # Calendar (Composio user that owns the Google Calendar connection)
     composio_api_key: SecretStr = SecretStr("")
@@ -41,13 +39,14 @@ class Settings(BaseSettings):
     # Business schedule
     business_timezone: str = "America/New_York"
     business_weekdays: str = "0,1,2,3,4"  # Monday = 0
+    business_start_hour: int = 8
+    business_end_hour: int = 17
+    service_call_minutes: int = 15
+    booking_horizon_days: int = 14
+    service_radius_miles: float = 30
 
-
-    ###TO MODIFY
-    business_start_hour: int = Field(default=8, ge=0, le=23)
-    business_end_hour: int = Field(default=17, ge=1, le=24)
-    service_call_minutes: int = Field(default=15, ge=5, le=120)
-    booking_horizon_days: int = Field(default=14, ge=1, le=60)
+    # Service area named in the greeting. Coverage is still decided per address by SERVICE_RADIUS_MILES.
+    counties: str = "Manhattan,Brooklyn"
 
     data_dir: Path = Path("data")
 
@@ -58,6 +57,16 @@ class Settings(BaseSettings):
     @property
     def weekdays(self) -> set[int]:
         return {int(day) for day in self.business_weekdays.split(",")}
+
+    @property
+    def county_names(self) -> list[str]:
+        return [name.strip() for name in self.counties.split(",") if name.strip()]
+
+    @property
+    def spoken_counties(self) -> str:
+        """The service area as it is said aloud: "Manhattan and Brooklyn", or "A, B, and C" for three or more."""
+        names = self.county_names
+        return " and ".join(names) if len(names) < 3 else ", ".join(names[:-1]) + f", and {names[-1]}"
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -76,6 +85,8 @@ class Settings(BaseSettings):
             raise ValueError("BUSINESS_WEEKDAYS must be comma-separated days from Monday 0 to Sunday 6") from None
         if self.business_start_hour * 60 + self.service_call_minutes > self.business_end_hour * 60:
             raise ValueError("BUSINESS_END_HOUR leaves no room for one service call after BUSINESS_START_HOUR")
+        if not self.county_names:
+            raise ValueError("COUNTIES must name at least one area we serve, e.g. Manhattan,Brooklyn")
         return self
 
     def require(self, *names: str) -> None:
